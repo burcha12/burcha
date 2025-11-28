@@ -3,11 +3,15 @@ const express = require('express');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
-const HELIUS_APIS = [
+const HELIUS_URL_TEMPLATE = "https://api.helius.xyz/v0/addresses/{address}/transactions/?api-key=";
+
+const API_KEYS = [
   process.env.RPC_URL || "",
   process.env.RPC_URL2 || "",
   process.env.RPC_URL3 || ""
-].filter(url => url.length > 0);
+].filter(key => key.length > 0);
+
+const HELIUS_APIS = API_KEYS.map(key => HELIUS_URL_TEMPLATE + key);
 
 const PLATFORMS = {
   "luck.io": [
@@ -113,9 +117,15 @@ async function fetchHeliusRaw(apiTemplate, address, pageBefore = null) {
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      return await resp.json();
+      if (!resp.ok) {
+        console.log(`HTTP Error ${resp.status} for ${address.slice(0,8)}...`);
+        throw new Error(`HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      console.log(`Fetched ${Array.isArray(data) ? data.length : 0} txs for ${address.slice(0,8)}...`);
+      return data;
     } catch (err) {
+      console.log(`Attempt ${attempt} failed: ${err.message}`);
       if (attempt === 2) throw err;
       await sleep(500 * attempt);
     }
@@ -200,6 +210,8 @@ if (!TELEGRAM_BOT_TOKEN) {
   const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
   console.log('Telegram Bot started!');
   console.log(`Configured ${HELIUS_APIS.length} RPC endpoints`);
+  
+  console.log(`API Keys configured: ${API_KEYS.length}`);
 
   bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
