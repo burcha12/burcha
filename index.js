@@ -21,6 +21,7 @@ const PLATFORMS = {
     "4xMajQJ7GSyUpRK2iyaQDN8vHnZpow8NZWuPjeWoYYBc"
   ],
   "rugs.fun": ["8VVe4Lk5veqnsmGzc8UZaue7S9vywBYf4Cgw8LXW7Tg"],
+  "MwinⓂ️": ["MWinVXj3HscKfwcdrJetvSgNFmEYPqC1NDxDd7vZqPd"],
   "solpump": [
     "3MBwwCXXnGFLXgP73kAUCPw7XdEzX8YL4Kjy16Gggrtk",
     "6YVBrao9DSLVGk7QsXxQVPbs4XyHVtHw9oSTTXw1otEW",
