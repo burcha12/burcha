@@ -20,7 +20,18 @@ const PLATFORMS = {
     "AQZdYsg36tEn8ZJ7RKSSLbUSLoGPBi71TCLruCDepYom",
     "4xMajQJ7GSyUpRK2iyaQDN8vHnZpow8NZWuPjeWoYYBc"
   ],
-  "rugs.fun": ["8VVe4Lk5veqnsmGzc8UZaue7S9vywBYf4Cgw8LXW7Tg"],
+  "🔰rugs.fun": [
+    "8VVe4Lk5veqnsmGzc8UZaue7S9vywBYf4Cgw8LXW7Tg",
+    "E3J16ZBEDnxRvQWmwisofGs975twiwCAxJRxV4fD3z6R"
+  ],
+  "🟣Oracle": [
+    "5iDZ59ARQiDuqgLmHv6qgfwW2RQ6gtVUQjbSPLYvN9iK",
+
+  ],
+  "😸Doubl": [
+    "HMq2uadrCJru2bhP1DJrVmjLM7pySS9rP5FGQjg5GULP",
+
+  ],
   "MwinⓂ️": ["MWinVXj3HscKfwcdrJetvSgNFmEYPqC1NDxDd7vZqPd"],
   "solpump": [
     "3MBwwCXXnGFLXgP73kAUCPw7XdEzX8YL4Kjy16Gggrtk",
